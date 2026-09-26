@@ -27,10 +27,15 @@ see the corresponding GitHub Release page.
   fallback when the modem is unavailable are unchanged. Modem settings
   (submode, squelch, auto-detect, TX text) persist across restarts. A real
   `org.openhpsdr.freedv` plugin, if ever installed, still takes precedence.
-  **RADEV1** remains gated until librade integration lands (see
-  `docs/designs/rade-v1-integration.md`); the **FreeDV Reporter** station
-  list / report-mode network client is a follow-up — the panel shows its
-  disconnected state and report-mode settings persist for when it lands.
+- **RADEV1 decodes and transmits.** The RADE V1 modem (`libzeus_rade`:
+  radae_c with the Opus FARGAN vocoder, weights compiled in) runs beside the
+  classic Codec 2 path (Linux, Windows x64 and macOS), and the End-of-Over
+  callsign is decoded. *(#4)*
+- **FreeDV Reporter is connected.** The stations panel shows the live
+  qso.freedv.org station list (view only, no personal data sent). Opt in with
+  your callsign and grid and Zeus reports your frequency, your transmissions
+  and the RADE callsigns you hear, like freedv-gui. QSY requests work both
+  ways: an incoming one shows with **Go** / **Dismiss**. *(#5)*
 
 ### 📡 WSPR — receive and beacon, in core
 
@@ -47,8 +52,8 @@ see the corresponding GitHub Release page.
   mid-signal within one audio block, per-transmission watchdog, band-change
   and page-close disarm in the UI, and a 30-minute abandoned-beacon
   auto-disarm as the backstop. Decoder + encoder + the full RX conversion
-  chain are loopback-validated in-tree. Follow-ups: wsprnet.org upload and
-  the propagation tracking map.
+  chain are loopback-validated in-tree. Spots go to WSPRnet and PSK Reporter
+  when spotting is on (see below); the propagation map is still to come.
 - **WSPR decodes more, and more cleanly.** wsprd's coarse search barely
   looked for drift (a macro divided the drift term by 375·256), so drifting
   beacons were searched as if steady. Fixed, the decoder finds everything the
@@ -66,8 +71,8 @@ see the corresponding GitHub Release page.
   or in the decode list: before the native library was retired the two ran
   side by side on the HL2 over 79 live slots (754 decodes) and every FT8 and
   FT4 transmission of a QSO session, with identical decodes and waveforms
-  throughout, and that output is frozen into the tests. It opens the door to multi-pass decoding
-  with subtraction, which the native decoder never had.
+  throughout, and that output is frozen into the tests. It opens the door to
+  multi-pass decoding with subtraction, which the native decoder never had.
 - **FT8/FT4 decode depth now works: multi-pass with subtraction.** The
   decode-depth setting (1-4 passes) used to be ignored. Now each pass after
   the first rebuilds the signals already decoded, subtracts them from the slot
@@ -76,6 +81,29 @@ see the corresponding GitHub Release page.
   20 m slots, three passes decode 38 % more (470 → 651). The first pass is
   still published at once, so replies to a QSO are not delayed; later passes
   add their decodes to the same slot as they finish.
+
+### 🖼️ SSTV — receive, gallery and transmit, in core
+
+- **Analog SSTV joins the Digital suite**, in managed code with no native
+  library. **Receive** Martin 1/2, Scottie 1/2/DX, PD 50–290 and Robot 36/72:
+  the VIS header is read even at low SNR, slant is corrected live and the
+  picture redrawn with the final fit, a picture tuned into halfway (or whose
+  VIS was lost to a fade) is recognised from its sync train, and the sender's
+  FSK ID callsign is decoded. Every picture lands in a **gallery** on disk,
+  where the newest can be redrawn with manual slant/shift or as another mode,
+  and logged as an SSTV QSO. **Transmit** one picture per SEND, composed at
+  the mode's exact resolution with your callsign and a text line, optionally
+  a header strip with callsign and software version; the receiver comes back
+  when the picture ends. Drive, PA and PureSignal are left alone.
+  *(#35, #36)*
+
+### 📍 Spotting — PSK Reporter and WSPRnet
+
+- **Your decodes reach the spotting networks.** The Spotting panel's PSK
+  Reporter and WSPRnet switches now do something: FT8/FT4 and WSPR decodes
+  go to PSK Reporter (batched every five minutes, as it asks), and WSPR spots
+  to WSPRnet too. Nothing leaves the machine unless you turn a network on
+  **and** give your callsign and grid; both switches default off. *(#12)*
 
 ## [0.10.9] — 2026-07-05
 
