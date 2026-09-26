@@ -23,10 +23,14 @@ public static class Ft8Managed
 
     /// <summary>Decode one slot of mono audio at any rate, mapped to the wire
     /// DTO as the native wrapper mapped it (dt to 0.01 s, frequency to 1 Hz).</summary>
-    public static IReadOnlyList<Ft8DecodeDto> Decode(float[] audio, int rate, bool isFt4) =>
-        ToDtos(FtxDecoder.Decode(audio, rate, isFt4, Table));
+    /// <paramref name="passes"/> &gt; 1 decodes again after subtracting what was
+    /// found; <paramref name="onPass"/> gets each pass's new decodes as they come.
+    public static IReadOnlyList<Ft8DecodeDto> Decode(float[] audio, int rate, bool isFt4, int passes = 1,
+                                                     Action<int, IReadOnlyList<Ft8DecodeDto>>? onPass = null) =>
+        ToDtos(FtxDecoder.Decode(audio, rate, isFt4, Table, passes,
+            onPass is null ? null : (pass, found) => onPass(pass, ToDtos(found))));
 
-    internal static IReadOnlyList<Ft8DecodeDto> ToDtos(List<FtxDecode> decodes)
+    internal static IReadOnlyList<Ft8DecodeDto> ToDtos(IReadOnlyList<FtxDecode> decodes)
     {
         var list = new List<Ft8DecodeDto>(Math.Min(decodes.Count, MaxDecodesPerSlot));
         foreach (var d in decodes)

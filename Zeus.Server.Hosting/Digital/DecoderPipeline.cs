@@ -61,13 +61,16 @@ public sealed class DecoderPipeline : IDisposable
     /// for ever, with no error anywhere.
     /// </param>
     public DecoderPipeline(ClockService clock, EventHub events, Func<DigitalMode>? mode = null,
-                           ILogger? log = null)
+                           ILogger? log = null, Func<int>? passes = null)
     {
         _clock = clock;
         _events = events;
         _mode = mode ?? (static () => DigitalMode.Ft8);
         _log = log ?? NullLogger.Instance;
+        _passes = passes ?? (static () => 1);
     }
+
+    private readonly Func<int> _passes;
 
     private readonly ILogger _log;
 
@@ -83,9 +86,12 @@ public sealed class DecoderPipeline : IDisposable
     /// it is managed code. Reported in /status and as Ft8TxStatus.nativeAvailable.</summary>
     public bool Available => Ft8Managed.Available;
 
-    /// <summary>Duration of the last decode pass. Surfaced in /status so the
-    /// timing budget is visible rather than mysterious.</summary>
+    /// <summary>Duration of the last slot's decode, all passes. Surfaced in
+    /// /status so the timing budget is visible rather than mysterious.</summary>
     public double? LastLatencyMs { get; private set; }
+
+    /// <summary>Time to the last slot's first batch — what the TX sequencer waits for.</summary>
+    public double? FirstPassLatencyMs { get; private set; }
 
     public void Start()
     {
@@ -200,31 +206,45 @@ public sealed class DecoderPipeline : IDisposable
                 IReadOnlyList<Ft8DecodeDto> decodes;
                 float[]? audio12k = null;
                 long slotStartMs = (long)SlotClock.SlotStartMs(ended, mode);
+                bool firstPublished = false;
+
+                // Each pass is published as soon as it is done. Pass 1 comes
+                // first and always — even when empty: the store keys off slot
+                // boundaries, and the TX sequencer acts the moment it lands, so
+                // later passes must never hold it back.
+                void Publish(int pass, IReadOnlyList<Ft8DecodeDto> found)
+                {
+                    _events.PublishFt8Decode(new Ft8DecodeBatch
+                    {
+                        Receiver = rx,
+                        SlotStartUnixMs = slotStartMs,
+                        Protocol = mode == DigitalMode.Ft4 ? "FT4" : "FT8",
+                        Decodes = found,
+                        Pass = pass,
+                    });
+                    if (pass == 1)
+                    {
+                        firstPublished = true;
+                        FirstPassLatencyMs = sw.Elapsed.TotalMilliseconds;
+                    }
+                }
+
                 try
                 {
-                    (decodes, audio12k) = DecodeSlot(audio, rate, mode);
+                    (decodes, audio12k) = DecodeSlot(audio, rate, mode, _passes(), Publish);
                 }
                 catch (Exception ex)
                 {
                     _log.LogWarning(ex, "ft8: decode failed for slot {Slot}", slotStartMs);
                     decodes = Array.Empty<Ft8DecodeDto>();
                 }
+                if (!firstPublished) Publish(1, decodes);
                 sw.Stop();
                 LastLatencyMs = sw.Elapsed.TotalMilliseconds;
 
-                // Publish even when empty: the store keys off slot boundaries and
-                // the UI's "listening" state depends on seeing slots tick by.
-                _events.PublishFt8Decode(new Ft8DecodeBatch
-                {
-                    Receiver = rx,
-                    SlotStartUnixMs = slotStartMs,
-                    Protocol = mode == DigitalMode.Ft4 ? "FT4" : "FT8",
-                    Decodes = decodes,
-                });
-
-                // Only after publishing: the TX sequencer reads each slot's
-                // decodes a fixed ~100-150 ms after the boundary, so nothing
-                // optional may sit between the decode and the publish.
+                // Only after publishing: the TX sequencer acts on each slot's
+                // first batch as it lands, so nothing optional may sit between
+                // the decode and the publish.
                 if (audio12k is not null && CaptureDir is not null)
                 {
                     var (a, d, md, s) = (audio12k, decodes, mode, slotStartMs);
@@ -272,14 +292,18 @@ public sealed class DecoderPipeline : IDisposable
     /// <summary>
     /// Decode one slot with the managed decoder, audio already aligned to the
     /// slot boundary on the disciplined clock (so dtSec is measured against it).
-    /// Also returns the 12 kHz audio for the shadow and the capture.
+    /// Returns every decode of every pass (each also handed to
+    /// <paramref name="onPass"/> as its pass completes) and the 12 kHz audio for
+    /// the capture.
     /// </summary>
-    private static (IReadOnlyList<Ft8DecodeDto>, float[]) DecodeSlot(float[] audio, int rate, DigitalMode mode)
+    private static (IReadOnlyList<Ft8DecodeDto>, float[]) DecodeSlot(float[] audio, int rate, DigitalMode mode,
+        int passes, Action<int, IReadOnlyList<Ft8DecodeDto>> onPass)
     {
         // Resample once and decode the 12 kHz copy: the decoder would resample
         // to exactly this, and it is what a capture must hold to replay the slot.
         float[] audio12k = FtxDecoder.ResampleTo12k(audio, rate);
-        return (Ft8Managed.Decode(audio12k, FtxDecoder.DecodeRate, mode == DigitalMode.Ft4), audio12k);
+        var all = Ft8Managed.Decode(audio12k, FtxDecoder.DecodeRate, mode == DigitalMode.Ft4, passes, onPass);
+        return (all, audio12k);
     }
 
     /// <summary>Save one slot for the golden corpus: &lt;slotStartMs&gt;_&lt;FT8|FT4&gt;.f32

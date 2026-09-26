@@ -116,6 +116,18 @@ describe('ft8-store ingest (0x38 decode frames)', () => {
     expect(useFt8Store.getState().lastBatchSlotMs).toBe(30_000);
   });
 
+  it('adds a later pass to its slot instead of replacing it', () => {
+    useFt8Store.setState({ rows: [], slots: [] });
+    useFt8Store.getState().ingest(batch(15_000, ['CQ K1ABC FN42', 'K1JT FN20']));
+    useFt8Store.getState().ingest({ ...batch(15_000, ['EA5IUE W1AW -15']), pass: 2 });
+
+    const { rows, slots } = useFt8Store.getState();
+    expect(rows.map((r) => r.text).sort()).toEqual(['CQ K1ABC FN42', 'EA5IUE W1AW -15', 'K1JT FN20']);
+    expect(new Set(rows.map((r) => r.id)).size).toBe(3); // no key collisions
+    expect(slots).toHaveLength(1);
+    expect(slots[0]?.count).toBe(3);
+  });
+
   it('clear() empties the table', () => {
     useFt8Store.getState().ingest(batch(1000, ['a', 'b']));
     useFt8Store.getState().clear();

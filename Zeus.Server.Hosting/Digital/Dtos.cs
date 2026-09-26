@@ -40,6 +40,10 @@ public sealed record Ft8DecodeBatch
     [JsonPropertyName("slotStartUnixMs")] public required long SlotStartUnixMs { get; init; }
     [JsonPropertyName("protocol")] public required string Protocol { get; init; }   // "FT8" | "FT4"
     [JsonPropertyName("decodes")] public required IReadOnlyList<Ft8DecodeDto> Decodes { get; init; }
+    /// <summary>Decoding pass. Pass 1 is the slot's first batch and always
+    /// comes; with multi-pass decoding, later passes follow for the same slot
+    /// carrying only the decodes they added.</summary>
+    [JsonPropertyName("pass")] public int Pass { get; init; } = 1;
 }
 
 /// <summary>The `txstatus` payload. BACKEND-AUTHORITATIVE — Ft8TxControl lights its
@@ -59,9 +63,9 @@ public sealed record Ft8TxStatus
 
 /// <summary>
 /// POST /ft8/enable body. The workspace has always sent this; the handler used
-/// to ignore it, which is how FT4 ended up decoding nothing. `receiver` and
-/// `passes` are accepted and still unused — the receiver comes from the audio
-/// tap, and decode depth is not wired through yet.
+/// to ignore it, which is how FT4 ended up decoding nothing. `passes` sets the
+/// decode depth (1-4: passes with subtraction). `receiver` is accepted and
+/// unused — the receiver comes from the audio tap.
 /// </summary>
 public sealed record Ft8EnableRequest
 {
@@ -133,6 +137,9 @@ public sealed record DigitalStatus
     /// <summary>Last decode pass duration — makes the timing budget visible instead
     /// of mysterious. Null until the first pass completes.</summary>
     [JsonPropertyName("decodeLatencyMs")] public double? DecodeLatencyMs { get; init; }
+    /// <summary>Time to the slot's first decode batch (pass 1) — what the TX
+    /// sequencer waits for; decodeLatencyMs covers every pass.</summary>
+    [JsonPropertyName("firstPassLatencyMs")] public double? FirstPassLatencyMs { get; init; }
 
     [JsonPropertyName("clock")] public ClockStatusDto? Clock { get; init; }
 

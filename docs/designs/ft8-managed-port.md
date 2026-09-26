@@ -79,8 +79,15 @@ About 3.2k lines of C to port, roughly 2–2.5k lines of C#.
 5. **Switch** `DecoderPipeline` and `Ft8KeyerService` to managed code, run a
    live shadow comparison, freeze the oracle, then delete `native/ft8`, its CI
    steps and the per-RID libraries.
-6. **Afterwards (separate work):** multi-pass decoding with subtraction,
-   honouring `passes`.
+6. **Afterwards (zeus-8d4i, done):** multi-pass decoding with subtraction,
+   honouring `passes`. `FtxSubtract` rebuilds each decoded signal from its
+   payload, refines start and frequency (baseband at 32 samples per symbol,
+   then full rate), estimates its complex amplitude with a normalised
+   triangle low-pass of s·conj(c) and subtracts it — about 30 dB of the signal
+   goes. Each pass is published as it completes (`Ft8DecodeBatch.pass`), so
+   the TX sequencer still acts on pass 1. Three passes: +38 % decodes on 27
+   busy FT8 slots, +7 % on 52 FT4 slots; ~470 ms per FT8 slot on Apple Silicon
+   in Release (pass 1 alone ~75 ms).
 
 Exactness caveats, as for WSPR: `cosf`/`erff`/`sinf` versus `MathF`, and float
 accumulation order, can change **borderline** weak decodes. The bar is the

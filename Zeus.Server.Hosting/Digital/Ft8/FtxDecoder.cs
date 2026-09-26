@@ -8,8 +8,9 @@
 // resampling, the pipeline and its settings, de-duplication, and the SNR
 // estimate).
 //
-// One pass, no subtraction — exactly what the native decoder did, which the
-// golden tests (TestData/ft8) hold it to. Better decoding is separate work.
+// One pass is exactly what the native decoder did, which the golden tests
+// (TestData/ft8) hold it to. More passes subtract what was decoded and search
+// again (FtxSubtract), as WSJT-X does.
 
 namespace Zeus.Server.Hosting.Digital.Ft8;
 
@@ -39,9 +40,18 @@ public static class FtxDecoder
     /// zeus_ft8_decode(): decode one slot of mono audio at any sample rate
     /// (resampled to 12 kHz). Hashed callsigns resolve through, and every call
     /// seen is saved into, <paramref name="hash"/>.
+    ///
+    /// <paramref name="passes"/> &gt; 1 decodes again after subtracting what the
+    /// previous pass decoded (FtxSubtract), so signals hidden under stronger
+    /// ones come through; it stops early when a pass finds nothing new. One
+    /// pass is exactly the native decoder's behaviour. <paramref name="onPass"/>
+    /// receives each pass's new decodes as soon as it has them (pass 1 always,
+    /// later passes only when they found something), so a caller can publish
+    /// the first pass without waiting for the rest.
     /// </summary>
     public static List<FtxDecode> Decode(ReadOnlySpan<float> audio, int sampleRate, bool isFt4,
-                                         IFtxCallsignHash? hash)
+                                         IFtxCallsignHash? hash, int passes = 1,
+                                         Action<int, IReadOnlyList<FtxDecode>>? onPass = null)
     {
         var output = new List<FtxDecode>();
         if (audio.Length == 0 || sampleRate <= 0) return output;
@@ -49,6 +59,28 @@ public static class FtxDecoder
         float[] sig = ResampleTo12k(audio, sampleRate);
         if (sig.Length == 0) return output;
 
+        passes = Math.Clamp(passes, 1, MaxPasses);
+        for (int pass = 0; pass < passes && output.Count < MaxDecodes; pass++)
+        {
+            var fresh = DecodePass(sig, isFt4, hash, output);
+            if (pass == 0 || fresh.Count > 0) onPass?.Invoke(pass + 1, fresh.Select(f => f.Decode).ToList());
+            if (fresh.Count == 0 || pass == passes - 1) break;
+            foreach (var (d, payload) in fresh)
+                FtxSubtract.Subtract(sig, isFt4, payload, d.FreqHz, d.DtSec);
+        }
+        return output;
+    }
+
+    /// <summary>Most passes a caller may ask for (the UI offers 1-4).</summary>
+    public const int MaxPasses = 4;
+
+    /// <summary>One candidate search + decode over <paramref name="sig"/>.
+    /// New messages are appended to <paramref name="output"/> and returned with
+    /// their payloads, for subtraction.</summary>
+    private static List<(FtxDecode Decode, byte[] Payload)> DecodePass(
+        float[] sig, bool isFt4, IFtxCallsignHash? hash, List<FtxDecode> output)
+    {
+        var fresh = new List<(FtxDecode, byte[])>();
         var mon = new FtxMonitor(isFt4, DecodeRate);
         int framePos = 0;
         while (framePos + mon.BlockSize <= sig.Length)
@@ -71,7 +103,8 @@ public static class FtxDecoder
             float freqHz = (mon.MinBin + cand.FreqOffset + (float)cand.FreqSub / mon.Wf.FreqOsr) / mon.SymbolPeriod;
             float timeSec = (cand.TimeOffset + (float)cand.TimeSub / mon.Wf.TimeOsr) * mon.SymbolPeriod;
 
-            // The same message often wins several candidates.
+            // The same message often wins several candidates (and, after a
+            // subtraction, can leave a trace a later pass decodes again).
             bool dup = false;
             foreach (var d in output)
             {
@@ -85,9 +118,11 @@ public static class FtxDecoder
 
             int snr = EstimateSnrDb(sig, freqHz, timeSec, isFt4);
             int snrDb = snr == SnrUnknown ? (int)(cand.Score * 0.5f) - 26 : snr;
-            output.Add(new FtxDecode(snrDb, timeSec, freqHz, cand.Score, text));
+            var decode = new FtxDecode(snrDb, timeSec, freqHz, cand.Score, text);
+            output.Add(decode);
+            fresh.Add((decode, payload.ToArray()));
         }
-        return output;
+        return fresh;
     }
 
     // ---- resampling ---------------------------------------------------------
