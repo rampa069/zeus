@@ -68,6 +68,14 @@ see the corresponding GitHub Release page.
   FT4 transmission of a QSO session, with identical decodes and waveforms
   throughout, and that output is frozen into the tests. It opens the door to multi-pass decoding
   with subtraction, which the native decoder never had.
+- **FT8/FT4 decode depth now works: multi-pass with subtraction.** The
+  decode-depth setting (1-4 passes) used to be ignored. Now each pass after
+  the first rebuilds the signals already decoded, subtracts them from the slot
+  and searches again, the way WSJT-X does, so stations hidden under stronger
+  ones come through — one 20 dB weaker only 6 Hz away in FT8. On 27 busy
+  20 m slots, three passes decode 38 % more (470 → 651). The first pass is
+  still published at once, so replies to a QSO are not delayed; later passes
+  add their decodes to the same slot as they finish.
 
 ## [0.10.9] — 2026-07-05
 

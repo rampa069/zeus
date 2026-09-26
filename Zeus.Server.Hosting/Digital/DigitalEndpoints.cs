@@ -29,12 +29,16 @@ public static class DigitalEndpoints
             WsprEnabled = d.WsprEnabled,
             DecoderAvailable = Ft8Managed.Available,
             DecodeLatencyMs = d.Decoder.LastLatencyMs,
+            FirstPassLatencyMs = d.Decoder.FirstPassLatencyMs,
             Clock = ClockStatusDto.From(d.Clock.Status),
             Call = d.Callsign,
             Grid = d.Grid,
         }));
 
         // ---- FT8 ------------------------------------------------------------
+        // No `passes` here: the workspace's decode-depth setting is the source of
+        // truth and reaches the backend through /ft8/enable; echoing the backend's
+        // value would let a status refresh overwrite the operator's choice.
         g.MapGet("/ft8", (DigitalService d) => Results.Ok(new { enabled = d.Ft8Enabled, mode = d.Mode }));
         // The body the workspace has always sent — {receiver, protocol, passes}
         // — used to be discarded, so selecting FT4 enabled an FT8 receiver and
@@ -45,8 +49,9 @@ public static class DigitalEndpoints
             if (!string.IsNullOrWhiteSpace(req?.Protocol))
                 d.Mode = string.Equals(req!.Protocol, "FT4", StringComparison.OrdinalIgnoreCase)
                     ? "FT4" : "FT8";
+            if (req?.Passes is int passes) d.Passes = passes;
             d.EnableFt8(true);
-            return Results.Ok(new { enabled = true, protocol = d.Mode });
+            return Results.Ok(new { enabled = true, protocol = d.Mode, passes = d.Passes });
         });
         g.MapPost("/ft8/disable", (DigitalService d) => { d.EnableFt8(false); return Results.Ok(new { enabled = false }); });
 

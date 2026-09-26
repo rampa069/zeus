@@ -56,6 +56,15 @@ public sealed class DigitalService : IHostedService, IDisposable
     public DecoderPipeline Decoder { get; }
 
     public bool Ft8Enabled { get; private set; }
+
+    /// <summary>FT8/FT4 decode depth: passes, each after subtracting what the
+    /// previous ones decoded (1 = a single pass). Set by /ft8/enable.</summary>
+    public int Passes
+    {
+        get => _passes;
+        set => _passes = Math.Clamp(value, 1, Ft8.FtxDecoder.MaxPasses);
+    }
+    private volatile int _passes = 1;
     public bool WsprEnabled { get; private set; }
     public bool Armed { get; private set; }
     public int AudioHz { get; set; } = 1500;
@@ -108,7 +117,7 @@ public sealed class DigitalService : IHostedService, IDisposable
     {
         _pipeline = pipeline;
         _log = log;
-        Decoder = new DecoderPipeline(Clock, Events, () => ModeKind, log);
+        Decoder = new DecoderPipeline(Clock, Events, () => ModeKind, log, () => Passes);
     }
 
     public Task StartAsync(CancellationToken ct)

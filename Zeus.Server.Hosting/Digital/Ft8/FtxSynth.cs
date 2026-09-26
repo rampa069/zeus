@@ -124,6 +124,48 @@ public static class FtxSynth
         return signal;
     }
 
+    /// <summary>
+    /// The instantaneous phase (radians, in double) of the GFSK waveform
+    /// <see cref="SynthGfsk"/> produces for <paramref name="symbols"/> — the
+    /// same pulse shaping, without the amplitude ramp. The decoder uses it to
+    /// rebuild a decoded signal as exp(jφ) and subtract it.
+    /// </summary>
+    internal static double[] GfskPhase(ReadOnlySpan<byte> symbols, double f0, float symbolBt,
+                                       float symbolPeriod, int rate)
+    {
+        int nSym = symbols.Length;
+        int nSpsym = SamplesPerSymbol(rate, symbolPeriod);
+        int nWave = nSym * nSpsym;
+
+        var pulse = new float[3 * nSpsym];
+        GfskPulse(nSpsym, symbolBt, pulse);
+
+        var dphi = new double[nWave + 2 * nSpsym];
+        double dphiPeak = 2.0 * Math.PI / nSpsym;
+        double dphiBase = 2.0 * Math.PI * f0 / rate;
+        for (int i = 0; i < dphi.Length; i++) dphi[i] = dphiBase;
+        for (int i = 0; i < nSym; i++)
+            for (int j = 0; j < 3 * nSpsym; j++)
+                dphi[i * nSpsym + j] += dphiPeak * symbols[i] * pulse[j];
+        for (int j = 0; j < 2 * nSpsym; j++)
+        {
+            dphi[j] += dphiPeak * pulse[j + nSpsym] * symbols[0];
+            dphi[nWave + j] += dphiPeak * pulse[j] * symbols[nSym - 1];
+        }
+
+        var phi = new double[nWave];
+        double p = 0;
+        for (int k = 0; k < nWave; k++)
+        {
+            phi[k] = p;
+            p += dphi[k + nSpsym];
+        }
+        return phi;
+    }
+
+    /// <summary>Symbol BT product of the GFSK pulse: FT8 2.0, FT4 1.0.</summary>
+    internal static float SymbolBt(bool isFt4) => isFt4 ? Ft4SymbolBt : Ft8SymbolBt;
+
     /// <summary>C fmodf: exact remainder with the sign of the dividend
     /// (C#'s % on floats is the same IEEE fmod).</summary>
     private static float CFmodf(float x, float y) => x % y;

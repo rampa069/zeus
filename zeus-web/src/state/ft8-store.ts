@@ -46,6 +46,10 @@ export interface Ft8DecodeBatch {
   slotStartUnixMs: number;
   protocol: Ft8ProtocolName;
   decodes: Ft8DecodeDto[];
+  /** Decoding pass (absent = 1). With multi-pass decoding a slot's first
+   *  batch (pass 1) is followed by batches that only ADD what a later pass
+   *  found under the signals already decoded. */
+  pass?: number;
 }
 
 /** A flattened decode row for the table (one message + its slot context). */
@@ -190,9 +194,13 @@ export const useFt8Store = create<Ft8State>((set, get) => ({
 
   ingest: (batch) =>
     set((s) => {
+      const pass = batch.pass ?? 1;
       const incoming: Ft8Row[] = batch.decodes.map((d, i) => ({
         ...d,
-        id: `${batch.receiver}:${batch.slotStartUnixMs}:${i}`,
+        id:
+          pass > 1
+            ? `${batch.receiver}:${batch.slotStartUnixMs}:p${pass}:${i}`
+            : `${batch.receiver}:${batch.slotStartUnixMs}:${i}`,
         receiver: batch.receiver,
         protocol: batch.protocol,
         slotStartUnixMs: batch.slotStartUnixMs,
@@ -200,14 +208,18 @@ export const useFt8Store = create<Ft8State>((set, get) => ({
       // Newest first, bounded.
       const rows = [...incoming, ...s.rows].slice(0, MAX_ROWS);
       const id = `${batch.receiver}:${batch.slotStartUnixMs}`;
-      const mark: Ft8SlotMark = {
-        id,
-        receiver: batch.receiver,
-        protocol: batch.protocol,
-        slotStartUnixMs: batch.slotStartUnixMs,
-        dialHz: useConnectionStore.getState().vfoHz,
-        count: batch.decodes.length,
-      };
+      // A later pass adds to its slot's mark; pass 1 (re)starts it.
+      const prior = pass > 1 ? s.slots.find((m) => m.id === id) : undefined;
+      const mark: Ft8SlotMark = prior
+        ? { ...prior, count: prior.count + batch.decodes.length }
+        : {
+            id,
+            receiver: batch.receiver,
+            protocol: batch.protocol,
+            slotStartUnixMs: batch.slotStartUnixMs,
+            dialHz: useConnectionStore.getState().vfoHz,
+            count: batch.decodes.length,
+          };
       let slots = [mark, ...s.slots.filter((m) => m.id !== id)].slice(0, MAX_SLOTS);
       // Once rows are trimmed, older marks would claim slots whose decodes are
       // gone — drop them.
