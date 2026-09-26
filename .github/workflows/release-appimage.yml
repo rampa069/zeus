@@ -131,7 +131,7 @@ jobs:
         run: |
           bash installers/create-linux-desktop-appimage.sh \
             "${{ steps.ver.outputs.version }}" linux-arm64
-          ls -la installers/output/*.AppImage
+          ls -la installers/output/OpenhpsdrZeus*.AppImage
 
       - name: Generate updater manifest (latest.json)
         env:
@@ -141,7 +141,10 @@ jobs:
           ZEUS_DOWNLOAD_VERSION: ${{ steps.ver.outputs.version }}
         run: |
           mkdir -p /tmp/release-artifacts
-          cp installers/output/*.AppImage /tmp/release-artifacts/
+          # Only Zeus's own AppImages: the build script caches the downloaded
+          # appimagetool-<arch>.AppImage in the same folder, and a bare
+          # *.AppImage shipped that build tool as a release download.
+          cp installers/output/OpenhpsdrZeus*.AppImage /tmp/release-artifacts/
           echo '{}' > /tmp/empty-manifest.json
           node tools/update-download-manifest.mjs \
             /tmp/release-artifacts /tmp/empty-manifest.json /tmp/release-artifacts/latest.json
